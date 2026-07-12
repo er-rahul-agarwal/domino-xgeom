@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------
+# THEIR CODE. Cloned, pinned, never edited, never committed.
+# The two-repository principle (plan Rem 15.2): our delta lives in
+# patches/, not in a fork. Committing external/ would bury a
+# ~400-line contribution inside a 100k-line diff and make rebasing
+# onto a new PhysicsNeMo release into archaeology.
+# Reproduced instead by: clone at the commit in environment.md,
+# then run patches/apply.sh
+# ---------------------------------------------------------------
+external/
+
+# ---------------------------------------------------------------
+# DATA AND CHECKPOINTS. Live on scratch, not in git.
+# DrivAerML surface meshes are ~10M elements per case, 500 cases.
+# Nothing here is authored; all of it is downloaded or generated.
+# ---------------------------------------------------------------
+data/
+*.stl
+*.vtp
+*.vtu
+*.zarr/
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+
+# ---------------------------------------------------------------
+# PYTHON
+# ---------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------
+# EDITOR / OS
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------
+# LATEX BUILD ARTEFACTS (the .tex is source; the rest is generated)
+# ---------------------------------------------------------------
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
