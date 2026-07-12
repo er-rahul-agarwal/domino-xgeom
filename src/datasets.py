@@ -162,6 +162,33 @@ class Dataset:
 # oriented differently, the integral loss would have optimized a force
 # component that is not drag, without complaint. It does not. One trap defused.
 STREAMWISE_AXIS = "x"
+# ** THE VERTICAL AXIS IS NOT CONSISTENT ACROSS DATASETS. **
+#
+# WindsorML paper: "for all the simulations in this work, y is upwards, which
+# differs to the original Windsor geometry where z is upwards." Our recon
+# confirms it: Windsor's STL spans y in [0, 0.475] (height) and z in [-0.194,
+# +0.194] (width). Ahmed and DrivAer have z up and y lateral.
+#
+# CONSEQUENCE: drag is SAFE -- x is streamwise in all three (see
+# STREAMWISE_AXIS above), and drag depends only on the x-component. But LIFT,
+# SIDE FORCE, and the y/z components of wall shear are NOT comparable across
+# datasets without a coordinate swap. The canonical Cf_y and Cf_z channels mean
+# different physical directions in Windsor than in the other two.
+#
+# This study reports drag, so the headline metric is unaffected. But the model
+# is TRAINED on all four channels, and a permuted y/z in one third of the
+# training data is exactly the kind of silent corruption this project exists to
+# avoid. Decide explicitly in Phase 3 whether to swap Windsor's axes into the
+# Ahmed/DrivAer convention. Do not leave this to chance.
+VERTICAL_AXIS = {"ahmed": "z", "windsor": "y", "drivaer": "z"}
+
+# ** WINDSOR IS YAWED. **
+# WindsorML paper: "The model is yawed by -2.5 degrees around the y-axis ... so
+# generating a positive side force consistent with the experiment." Ahmed and
+# DrivAer are at zero yaw. Windsor's flow is therefore ASYMMETRIC by design.
+# Recorded because it is a real physical difference between the source bodies
+# and the target, and belongs in the study's stated limitations.
+YAW_DEGREES = {"ahmed": 0.0, "windsor": -2.5, "drivaer": 0.0}
 
 
 # The canonical output space. Fixed order, enforced at the datapipe boundary.
@@ -210,12 +237,10 @@ DATASETS: dict[str, Dataset] = {
         name="windsor",
         u_inf=30.0,          # WindsorML paper: "freestream velocity of 30 m s-1"
         nu=None,             # TODO: not yet retrieved from the WindsorML paper
-        # TODO: the constant A_ref for Windsor is not yet confirmed from the
-        # paper. geo_parameters_1.csv publishes a PER-CASE frontal_area
-        # (0.11834 m^2 for run_1), which is the VARIABLE one. Do not guess:
-        # back it out in Phase 2 from Cd_const / Cd_var * a_ref_var, and
-        # cross-check against the paper before trusting any Windsor Cd.
-        a_ref_const=None,
+        # WindsorML paper: "The reference frontal area is defined by the vehicle
+        # height and width and for the baseline geometry is 0.112 m^2."
+        # Coincidentally identical to Ahmed's -- both are ~1/4-scale models.
+        a_ref_const=0.112,
         const_force_csv="force_mom_*.csv",        # CONSTANT (matches Ahmed)
         var_force_csv="force_mom_varref_*.csv",   # variable
         cd_column="cd",
