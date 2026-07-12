@@ -904,36 +904,205 @@ if __name__ == "__main__":
 
 \subsection{The compatibility table}
 
-This must be completed from \emph{inspected data}, not from documentation.
+Completed from \emph{inspected data} (\texttt{src/recon.py}) and the three dataset
+papers. Not from documentation --- NVIDIA's README has already been shown to
+contradict its own repository (\cref{rem:treereality}).
 
-\begin{center}\small
-\begin{tabular}{@{}p{6.5cm}ccc@{}}
+\begin{center}\footnotesize
+\begin{tabular}{@{}p{3.5cm}p{3.4cm}p{3.4cm}p{3.4cm}@{}}
 \toprule
 \textbf{Question} & \textbf{Ahmed} & \textbf{Windsor} & \textbf{DrivAer} \\
 \midrule
-Surface pressure field name                & & & \\
-Wall-shear field name(s)                   & & & \\
-Pressure units (Pa or $\Cp$?)              & & & \\
-\textbf{Variable order in the array}       & & & \\
-\textbf{Streamwise axis (must be $x$ --- \cref{rem:streamwise})} & & & \\
-Inlet velocity $U_\infty$                  & & & \\
-Air density $\rho$                         & & & \\
-Frontal area $A$ (given, or computed how?) & & & \\
-Body length scale $L$                      & & & \\
-Reference area behind \emph{their} published $\Cd$ & & & \\
-Fields on points or on cells?              & & & \\
+Surface file & \texttt{boundary\_*.vtp} & \textbf{\texttt{boundary\_*.vtu}} & \texttt{boundary\_*.vtp} \\
+Fields on points or cells? & \textbf{cell} & \textbf{point} & \textbf{cell} \\
+$\Cp$ field name & \texttt{static(p)\_coeffMean} & \texttt{cpavg} & \texttt{CpMeanTrim} \\
+Dimensional $p$ field & \texttt{pMean} & \textbf{none published} & \texttt{pMeanTrim} \\
+Wall-shear storage & one 3-vector, \textbf{Pa} & \textbf{three scalars}, already $\Cf$ & one 3-vector, \textbf{Pa} \\
+Wall-shear name(s) & \texttt{wallShearStressMean} & \texttt{cfxavg},\ \texttt{cfzavg},\ \texttt{cfyavg} \emph{(file order: z before y)} & \texttt{wallShearStress\-MeanTrim} \\
+$U_\infty$ & \textbf{1 m/s} & 30 m/s & 38.889 m/s \\
+$\nu$ & $3.75\times10^{-7}$ & --- & $1.507\times10^{-5}$ \\
+Constant $A_{\text{ref}}$ & 0.112 m$^2$ \emph{(paper only)} & 0.112 m$^2$ & 2.17 m$^2$ \\
+\textbf{Constant-ref force file} & \texttt{force\_mom\_*.csv} & \texttt{force\_mom\_*.csv} & \textbf{\texttt{force\_mom\_constref\_*}} \\
+Variable-ref force file & \texttt{force\_mom\_varref\_*} & \texttt{force\_mom\_varref\_*} & \textbf{\texttt{force\_mom\_*.csv}} \\
+$\Cd$ column header & \texttt{cd} \emph{(lowercase)} & \texttt{cd} \emph{(lowercase)} & \texttt{Cd} \emph{(uppercase)} \\
+\textbf{Streamwise axis} & \textbf{x} & \textbf{x} & \textbf{x} \\
+\textbf{Vertical axis} & \textbf{z} & \textbf{y} & \textbf{z} \\
+\textbf{Yaw} & $0^\circ$ & $\mathbf{-2.5^\circ}$ & $0^\circ$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\begin{criterion}[Phase 0]
+\begin{remark}[Every column of that table contains a trap]
+\label{rem:traps}
+The three datasets were published by the same group, in a deliberately consistent
+format, explicitly so that ML methods could be tested across them. They are
+nonetheless incompatible in seven ways, \emph{all} of which fail silently. The table
+above is the output of \texttt{src/recon.py} and the three dataset papers; it is
+encoded, with provenance, in \texttt{src/datasets.py}, which is the single source of
+truth. \textbf{Nothing else in this project may hardcode a field name or a reference
+area.} The individual traps are stated in
+\cref{rem:refarea,rem:windsorfmt,rem:velocity,rem:windsoraxes}.
+\end{remark}
+
+\begin{remark}[The reference-area trap: \texttt{force\_mom\_1.csv} inverts meaning]
+\label{rem:refarea}
+Each dataset publishes \emph{two} force files: one normalized by a constant reference
+area, one by each case's own frontal area. The filenames are the trap.
+
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+& \textbf{\texttt{force\_mom\_<i>.csv}} & \textbf{Suffixed file} \\
+\midrule
+Ahmed   & \textbf{constant} & \texttt{\_varref} $=$ variable \\
+Windsor & \textbf{constant} & \texttt{\_varref} $=$ variable \\
+DrivAer & \textbf{variable} & \texttt{\_constref} $=$ constant \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The unsuffixed file means \emph{opposite things} in the source datasets and the target.
+Loading \texttt{force\_mom\_1.csv} uniformly --- the obvious implementation --- yields
+constant-reference ground truth from Ahmed and Windsor and variable-reference ground
+truth from DrivAer, across \emph{precisely} the boundary this study transfers over.
+
+\textbf{The magnitude is not marginal.} For Ahmed run\_1 the two conventions differ by
+\textbf{47 drag counts} (0.2385 vs 0.2854); for DrivAer run\_1, by 7.4. The headline
+metric of this study is measured in drag counts, and the effect being measured is
+smaller than the error this would introduce.
+
+Confirmed from three independent sources: the AhmedML paper (Table 3), the WindsorML
+paper (which states the convention explicitly), and DrivAerML's own
+\texttt{geo\_ref\_<i>.csv}, which publishes \texttt{aRef} $=2.223$ (this morph) alongside
+\texttt{aRefRef} $=2.17$ (constant) --- and $0.3035 \times (2.223/2.17) = 0.3109$,
+reconciling the two files arithmetically.
+
+\textbf{This study uses the constant-reference file throughout}, which means
+\texttt{force\_mom\_*.csv} for Ahmed and Windsor but
+\texttt{force\_mom\_constref\_*.csv} for DrivAer. The reason is \cref{def:rank}: the
+usability metric is a design \emph{ranking}, and under a per-case area a morph that
+changes frontal area moves its own $\Cd$ for reasons unrelated to the flow.
+\end{remark}
+
+\begin{remark}[Windsor's surface is a \texttt{.vtu} with point data]
+\label{rem:windsorfmt}
+Ahmed and DrivAer ship \texttt{boundary\_<i>.vtp} --- polydata, fields on \emph{cells}.
+Windsor ships \texttt{boundary\_<i>.vtu} --- an unstructured grid, fields on
+\emph{points}. It is a surface in a volume container.
+
+Two consequences. A loader globbing for \texttt{*.vtp} finds nothing in Windsor. And
+area-weighted integration (\cref{eq:forces}) requires \emph{cell} data, so Windsor must
+be converted before any force is computed --- \texttt{point\_data\_to\_cell\_data()}, not
+optional.
+
+Note also that PhysicsNeMo-Curator ships worked examples for \texttt{ahmedml} and
+\texttt{drivaerml} but \textbf{not} for Windsor. Windsor is therefore the custom dataset,
+and the bulk of this project's engineering delta lives there.
+\end{remark}
+
+\begin{remark}[$U_\infty$ spans 39$\times$, so wall shear spans $\sim$1500$\times$]
+\label{rem:velocity}
+Ahmed runs at $U_\infty = \mathbf{1}$ m/s. Not 30. The AhmedML paper sets its Reynolds
+number ($7.68\times10^5$ on body height) through the \emph{viscosity},
+$\nu = 3.75\times10^{-7}$, not the velocity. Windsor runs at 30 m/s; DrivAer at 38.889.
+
+Wall shear scales as $U_\infty^2$, so the \emph{dimensional} shear fields differ by a
+factor of roughly 1500 between Ahmed and DrivAer. This is directly visible in the recon
+output: Ahmed's \texttt{wallShearStressMean} spans $\pm0.036$; DrivAer's
+\texttt{wallShearStressMeanTrim} spans $\pm40$.
+
+Training on both without non-dimensionalizing would let DrivAer dominate the loss
+entirely --- Ahmed's contribution would be numerical noise. This is not a subtle
+weighting issue; it is three orders of magnitude.
+
+Windsor is the exception: it publishes $\Cf$ directly, already non-dimensional. Ahmed and
+DrivAer must be divided by $q = \tfrac{1}{2}\rho U_\infty^2$. \textbf{None of the three
+datasets publishes $\rho$} --- they are incompressible simulations specified by kinematic
+viscosity. Phase 2 must verify the assumed $\rho$ by recomputing $\Cp$ from $p$ and $q$
+and checking against each dataset's own published $\Cp$ field. If they disagree, $\rho$
+is wrong.
+\end{remark}
+
+\begin{remark}[Windsor is y-up and yawed; drag survives, lift does not]
+\label{rem:windsoraxes}
+The WindsorML paper: \emph{``for all the simulations in this work, y is upwards, which
+differs to the original Windsor geometry where z is upwards.''} Recon confirms it ---
+Windsor's STL spans $y \in [0, 0.475]$ (height) and $z \in [-0.194, +0.194]$ (width).
+Ahmed and DrivAer are z-up.
+
+\textbf{Drag is safe.} $x$ is streamwise in all three (verified from the STL bounding
+boxes), and drag depends only on the $x$-component. \Cref{rem:streamwise} is therefore
+resolved favourably: DoMINO's \texttt{normals[:, :, 0]} assumption holds.
+
+\textbf{Lift, side force, and the $y$/$z$ shear channels are not.} The canonical
+$\Cf_{,y}$ and $\Cf_{,z}$ mean \emph{different physical directions} in Windsor than in
+the other two. The model is trained on all four channels, so a permuted $y$/$z$ in one
+third of the training data is exactly the silent corruption this project is built to
+prevent. \textbf{Phase 3 must decide explicitly whether to swap Windsor's axes into the
+Ahmed/DrivAer convention.}
+
+Compounding this: Windsor's wall shear is stored as three separate scalars in file order
+\texttt{cfxavg}, \texttt{cfzavg}, \texttt{cfyavg} --- \emph{z before y}. Stacking them in
+array order produces a permuted vector \emph{on top of} the axis difference.
+
+\textbf{And Windsor is yawed $-2.5^\circ$}, generating a side force by design; Ahmed and
+DrivAer are at zero yaw. Windsor's flow is asymmetric where the others are symmetric.
+This is a real physical difference between the source bodies and the target, and belongs
+in the limitations.
+\end{remark}
+
+\begin{criterion}[Phase 0 --- CLEARED]
 \label{crit:p0}
-The repository structure of \cref{sec:structure} exists, and its \texttt{external/}
-section has been \emph{verified against the actual clone} and corrected; the upstream
-commit hash is recorded; the compatibility table is fully populated from inspected data;
-the canonical output space (\cref{def:canonical}) is committed in writing; and the
-frontal-area convention for each body is stated in one sentence.
+\textbf{Cleared 2026-07-11.} Repository structure exists; \texttt{external/} verified
+against the actual clone and \cref{sec:structure} corrected accordingly
+(\cref{rem:treereality}); upstream pinned at \texttt{physicsnemo@59aaf59},
+\texttt{physicsnemo-curator@86533e5}, \texttt{physicsnemo-cfd@0d2305e}, recorded in
+\texttt{environment.md}. The compatibility table is populated from \emph{inspected data}
+(\texttt{src/recon.py}, run on one case from each dataset) and the three dataset papers.
+The canonical output space is committed: $[\Cp, \Cf_x, \Cf_y, \Cf_z]$ --- a choice that
+is \emph{forced}, not preferred, because Windsor publishes no dimensional pressure
+(\cref{rem:velocity}). The frontal-area convention is declared: \textbf{constant
+reference throughout}, which means \texttt{force\_mom\_*.csv} for Ahmed and Windsor but
+\texttt{force\_mom\_constref\_*.csv} for DrivAer (\cref{rem:refarea}).
+
+All of the above is encoded with provenance in \texttt{src/datasets.py}, which is the
+single source of truth for dataset differences. \textbf{No other file in this project may
+hardcode a field name, a reference area, or a freestream velocity.}
 \end{criterion}
+
+\begin{remark}[What Phase 0 actually bought]
+\label{rem:p0value}
+Seven silent traps, none of which appeared in the plan as first written, and none of
+which would have raised an error:
+
+\begin{enumerate}[label=(\arabic*),leftmargin=2em]
+  \item Variable ordering hardcoded at \texttt{loss.py:423} --- channel 0 must be
+  pressure, channel 1 must be $x$-wall-shear (\cref{rem:ordering}).
+  \item Fine-tuning via \texttt{resume\_dir} restores the epoch counter, so a
+  fine-tuning run starting from a 500-epoch checkpoint with
+  \texttt{train.epochs=50} exits immediately having trained nothing --- and writes a
+  checkpoint. The recovery curve would have been a flat line (\cref{rem:epochtrap}).
+  \item \texttt{force\_mom\_1.csv} means \emph{constant} reference in Ahmed and Windsor
+  but \emph{variable} in DrivAer. 47 drag counts on Ahmed (\cref{rem:refarea}).
+  \item Windsor ships \texttt{.vtu} with point data, not \texttt{.vtp} with cell data
+  (\cref{rem:windsorfmt}).
+  \item Windsor's wall shear is three scalars in \texttt{cfx}, \texttt{cfz},
+  \texttt{cfy} order --- $z$ before $y$ (\cref{rem:windsoraxes}).
+  \item $U_\infty$ spans 39$\times$; dimensional wall shear spans $\sim$1500$\times$
+  (\cref{rem:velocity}).
+  \item Windsor is \textbf{y-up} and \textbf{yawed $-2.5^\circ$}
+  (\cref{rem:windsoraxes}).
+\end{enumerate}
+
+Every one of these produces a smoothly converging loss curve and a worthless model. Not
+one produces an error message. This is the entire justification for the exit-criterion
+discipline: \textbf{the dominant risks in this project are silent, and the criteria are
+the only detectors.}
+
+One trap was defused rather than found: the streamwise axis \emph{is} $x$ in all three
+datasets (\cref{rem:streamwise}), so DoMINO's \texttt{normals[:, :, 0]} assumption holds.
+That was verified, not assumed.
+\end{remark}
 
 % ============================================================
 \section{Phase 1 --- Baseline Reproduction}
@@ -1981,10 +2150,54 @@ HYPOTHESIS LEDGER  (registered in advance -- mark held/refuted, with
   H3.5 source diversity buys transfer    [ ] held / refuted:  ______
        (A3a cold Cd vs A3 cold Cd)
 
-STATUS: completed through Phase ___
-LAST RESULT: ___
-BLOCKER: ___
-UPSTREAM COMMIT: physicsnemo @ ___
+STATUS: PHASE 0 COMPLETE (2026-07-11). Exit criterion 7.1 cleared.
+
+UPSTREAM COMMITS (pinned, in environment.md):
+  physicsnemo         @ 59aaf59b48901bd8df2c9bad83f6d05ea47d8c04
+  physicsnemo-curator @ 86533e581b3550326d89e97cb4d4126e7061b416
+  physicsnemo-cfd     @ 0d2305e1777351569b1795ce38884ee945491d28
+
+PHASE 0 FOUND SEVEN SILENT TRAPS. None were in the plan. None raise
+an error. All produce a converging loss and a worthless model.
+Read Rem 7.2 (rem:p0value) before doing ANYTHING else.
+
+  1. loss.py:423 -- channel 0 MUST be pressure, channel 1 MUST be
+     x-wall-shear. Hardcoded positional indexing.
+  2. NO retraining.py. Fine-tune via resume_dir + train.py -- but it
+     restores the EPOCH COUNTER. A 500-epoch checkpoint with
+     train.epochs=50 exits immediately having trained NOTHING, and
+     writes a checkpoint. RECOVERY CURVE WOULD BE A FLAT LINE.
+     Patch #1 = weights-only load + force init_epoch=0.
+  3. force_mom_<i>.csv = CONSTANT ref in Ahmed/Windsor,
+     VARIABLE ref in DrivAer. Same filename, opposite meaning,
+     across exactly the boundary we transfer over. 47 drag counts
+     on Ahmed. USE src/datasets.py -- never hardcode the filename.
+  4. Windsor surface is .vtu with POINT data. Ahmed/DrivAer are
+     .vtp with CELL data. A *.vtp glob finds nothing in Windsor.
+  5. Windsor wall shear = 3 separate scalars, file order cfx, cfz,
+     cfy -- Z BEFORE Y. Stacking in array order permutes channels.
+  6. U_inf spans 39x (Ahmed 1 m/s, DrivAer 38.889). Dimensional
+     wall shear spans ~1500x. Must non-dimensionalize or DrivAer
+     dominates the loss entirely.
+  7. Windsor is Y-UP (not z-up) and YAWED -2.5 deg. Drag is safe
+     (x is streamwise in all three). LIFT AND Cf_y/Cf_z ARE NOT
+     COMPARABLE. Phase 3 must decide on an axis swap.
+
+DEFUSED: streamwise axis IS x in all three. Verified, not assumed.
+
+SINGLE SOURCE OF TRUTH: src/datasets.py. Every field name, reference
+area, U_inf, and file convention lives there, with provenance.
+NOTHING ELSE MAY HARDCODE THEM.
+
+NEXT: Phase 1 (baseline reproduction on DrivAerML, Drag R2 > 0.95).
+      BLOCKED ON: cluster access. environment.md cluster fields are
+      all TODO -- scheduler, GPU count, wall-clock limit, scratch
+      quota and purge policy. The 22-run matrix cannot be sized
+      without them.
+
+LAST RESULT: recon_all.json (1 case from each dataset, on disk at
+             D:\data\{ahmedml,windsorml,drivaerml}\run_1)
+BLOCKER: cluster access not yet configured.
 \end{lstlisting}
 
 % ============================================================
