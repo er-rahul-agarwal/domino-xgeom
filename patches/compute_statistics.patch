@@ -1,0 +1,70 @@
+# ============================================================
+# PATCH #2 -- compute_statistics.py
+#
+# ** THE BUG **
+#   compute_statistics.py hardcodes its target_keys to include the VOLUME fields,
+#   regardless of cfg.model.model_type. On a surface-only dataset it then does:
+#
+#       torch.from_numpy(data["volume_fields"])
+#
+#   on a key whose value is None, and dies:
+#
+#       TypeError: expected np.ndarray (got NoneType)
+#
+#   This is a bug in NVIDIA's example, not in our data. The script ignores
+#   model_type entirely -- and "surface" is one of the three values their own
+#   config documents.
+#
+# ** WHY WE DO NOT SIMPLY OMIT THE VOLUME KEYS FROM OUR .npy **
+#   Because then data["volume_fields"] raises KeyError instead of TypeError. The
+#   script would still be asking for a key that cannot exist. The fix belongs
+#   where the assumption is made.
+#
+# ** WHY THIS IS A PATCH AND NOT AN EDIT **
+#   The two-repository principle: external/ is a pinned, gitignored clone and we
+#   never edit it in place. Everything we change to their code lives here, is
+#   re-appliable after a re-clone, and is legible as a small, honest delta.
+#
+# APPLIES TO: physicsnemo @ 59aaf59b48901bd8df2c9bad83f6d05ea47d8c04
+# ============================================================
+--- a/examples/cfd/external_aerodynamics/domino/src/compute_statistics.py
++++ b/examples/cfd/external_aerodynamics/domino/src/compute_statistics.py
+@@ -92,13 +92,29 @@
+     if scaling_factors is None:
+         logger.info("Computing scaling factors from dataset...")
+         start_time = time.perf_counter()
+ 
+-        target_keys = [
+-            "volume_fields",
+-            "surface_fields",
+-            "stl_centers",
+-            "volume_mesh_centers",
+-            "surface_mesh_centers",
+-        ]
++        # ** PATCHED: respect model_type. **
++        #
++        # The original hardcoded all five keys, including the volume ones. On a
++        # surface-only dataset -- where volume_fields is None, because there is no
++        # volume data and the volume meshes are 61x larger on disk -- CAEDataset
++        # then calls torch.from_numpy(None) and dies with
++        #
++        #     TypeError: expected np.ndarray (got NoneType)
++        #
++        # model_type is a documented config value with three legal settings
++        # (surface / volume / combined). This script honoured none of them.
++        model_type = cfg.model.model_type
++
++        target_keys = ["stl_centers"]
++        if model_type in ("surface", "combined"):
++            target_keys += ["surface_fields", "surface_mesh_centers"]
++        if model_type in ("volume", "combined"):
++            target_keys += ["volume_fields", "volume_mesh_centers"]
++
++        logger.info(f"model_type={model_type}, target_keys={target_keys}")
+ 
+         mean, std, min_val, max_val = compute_scaling_factors(
+             cfg=cfg,
+             input_path=cfg.data.input_dir,
+             target_keys=target_keys,
+             max_samples=cfg.data.max_samples_for_statistics,
+         )
