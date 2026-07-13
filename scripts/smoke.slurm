@@ -90,8 +90,33 @@ echo ""
 
 cd "$DOMINO"
 
+# ** PHYSICSNEMO_DISABLE_RMM=True IS REQUIRED, NOT OPTIONAL. **
+#
+# PhysicsNeMo sets up the Rapids Memory Manager as a SHARED allocation pool
+# between cuML and torch -- otherwise the kNN preprocessing spends much of its
+# time in memory allocation and starves torch of memory.
+#
+# It initializes at IMPORT time, before any config is read, which is why it is an
+# environment variable rather than a config key -- NVIDIA say so explicitly in the
+# DoMINO README.
+#
+# In this container it FAILS, and the failure is disguised:
+#
+#     ImportError: cannot import name 'unified_gpu_memory' from
+#     'physicsnemo.utils.memory'.  Did you mean: '_setup_unified_gpu_memory'?
+#
+# That message points at a missing symbol. The symbol is NOT missing -- memory.py
+# resolves it through a module-level __getattr__ hook. What is actually happening
+# is that _setup_unified_gpu_memory() RAISES while initializing rmm, and the
+# exception surfaces as an ImportError on the outer name.
+#
+# We lost time chasing a phantom "broken commit" because of that message.
+#
+# Cost of disabling: RMM is a PERFORMANCE optimization. We lose the shared pool
+# and some allocation throughput. We lose no correctness.
 apptainer exec --nv \
     --env PYTHONPATH="$DEPS:$REPO/external/physicsnemo" \
+    --env PHYSICSNEMO_DISABLE_RMM=True \
     --bind "$HOME/smoke:/data" \
     "$SIF" \
     python train.py --config-name=smoke \
