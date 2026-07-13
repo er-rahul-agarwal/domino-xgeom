@@ -95,6 +95,37 @@ class SurfaceFields:
     # Source: recon_all.json, Phase 0.
     wss_components: tuple[str, str, str] | None
 
+    # ** HOW TO GET OUTWARD NORMALS. Three datasets, three different answers. **
+    #
+    # This is not a style choice. Each dataset needs a different method, and using
+    # the wrong one produces a plausible Cd that is silently wrong. Determined
+    # empirically in Phase 2 by validating against published Cd:
+    #
+    #   "clean"     Ahmed. The raw mesh has 58,308 open edges -- it is stitched
+    #               from per-patch exports with duplicated vertices at the seams.
+    #               To VTK this is an OPEN surface, and for an open surface
+    #               "outward" is undefined, so auto_orient_normals returns an
+    #               inconsistent mix. clean(1e-6) merges the coincident vertices:
+    #               open edges drop to 0, is_manifold becomes True, and
+    #               auto_orient_normals then works correctly on its own.
+    #
+    #   "shipped"   Windsor. The dataset PROVIDES a Normals array -- unit length,
+    #               consistently oriented. Use it.
+    #               ** DO NOT CALL clean() ON WINDSOR. ** At tolerances loose
+    #               enough to affect its topology, clean() MERGES CELLS and leaves
+    #               the cell arrays at their old length -- 4.99M cells against a
+    #               9.92M-entry cfxavg array. The data no longer corresponds to the
+    #               geometry, and pyvista only warns.
+    #
+    #   "flip"      DrivAer. Ships no normals, AND clean() does not help: 7,383
+    #               open edges before, 7,383 after. The cracks are not duplicate
+    #               vertices. But consistent_normals=True makes the orientation
+    #               locally coherent, leaving only a single GLOBAL sign to fix --
+    #               and that sign is settled against the published Cd. Verified:
+    #               un-flipped gives Cd = -0.253; flipped gives +0.31093 against a
+    #               published 0.31092.
+    normals: str   # "clean" | "shipped" | "flip"
+
 
 @dataclass(frozen=True)
 class Dataset:
@@ -110,6 +141,25 @@ class Dataset:
     # Kinematic viscosity, m^2/s. Recorded for completeness; not used for
     # surface-only work, but needed to reproduce or extend the datasets.
     nu: float | None
+
+    # Density, kg/m^3.
+    #
+    # ** NOT PUBLISHED BY ANY DATASET. ** These are incompressible OpenFOAM-style
+    # solvers working in KINEMATIC units -- pressure is stored as p/rho -- so rho
+    # never appears in their inputs. Assuming 1.225 (sea-level air) is the
+    # natural mistake and it is WRONG.
+    #
+    # Backed out empirically in Phase 2, not guessed. Each dataset publishes BOTH
+    # p and Cp, so their ratio IS q:
+    #
+    #     Ahmed:  p / Cp = 0.500000  (std 1.8e-9 over 1.1M facets)
+    #             q = 0.5, U = 1.0  ->  rho = 2q/U^2 = 1.0
+    #
+    # With rho=1.225 the Ahmed viscous drag came out 22% low and Cd was 5% short.
+    # With rho=1.0 it lands within 0.03% of the published value.
+    #
+    # Windsor is immune -- it publishes Cf directly, so rho never enters its Cd.
+    rho: float | None
 
     # ---- Reference area -----------------------------------------------------
     # The CONSTANT reference area, m^2. This is the one this study uses; see
@@ -214,6 +264,7 @@ DATASETS: dict[str, Dataset] = {
         # looks like a typo. It is not.
         u_inf=1.0,
         nu=3.75e-7,          # AhmedML paper, Boundary conditions
+        rho=1.0,             # VERIFIED Phase 2: p/Cp = 0.5 exactly, U=1.0
         # AhmedML paper, Geometry: "a reference area of A_ref = 0.112".
         # NOT published in any CSV -- the dataset ships no geo_ref file. This
         # number exists only in the paper.
@@ -229,6 +280,7 @@ DATASETS: dict[str, Dataset] = {
             p="pMean",
             wss_vector="wallShearStressMean",   # 3-vector, DIMENSIONAL (Pa)
             wss_components=None,
+            normals="clean",     # 58,308 open edges -> 0. Verified Phase 2.
         ),
         source="arxiv.org/abs/2407.20801 + recon_all.json",
     ),
@@ -237,6 +289,10 @@ DATASETS: dict[str, Dataset] = {
         name="windsor",
         u_inf=30.0,          # WindsorML paper: "freestream velocity of 30 m s-1"
         nu=None,             # TODO: not yet retrieved from the WindsorML paper
+        # Not needed: Windsor publishes Cf directly, so rho never enters its Cd.
+        # Left None deliberately -- if code tries to use it, that is a bug worth
+        # crashing on rather than silently defaulting.
+        rho=None,
         # WindsorML paper: "The reference frontal area is defined by the vehicle
         # height and width and for the baseline geometry is 0.112 m^2."
         # Coincidentally identical to Ahmed's -- both are ~1/4-scale models.
@@ -261,6 +317,7 @@ DATASETS: dict[str, Dataset] = {
             # These are ALREADY coefficients; unlike Ahmed and DrivAer, they
             # need no division by q.
             wss_components=("cfxavg", "cfyavg", "cfzavg"),
+            normals="shipped",   # ** NEVER clean() -- it destroys the cell arrays **
         ),
         source="arxiv.org/abs/2407.19320 + recon_all.json",
     ),
@@ -270,6 +327,12 @@ DATASETS: dict[str, Dataset] = {
         # DrivAerML paper: "freestream velocity of U_inf = 38.889 m/s".
         u_inf=38.889,
         nu=1.507e-5,         # DrivAerML paper
+        # VERIFIED Phase 2, by the same p/Cp method used for Ahmed -- not assumed
+        # by analogy. DrivAer publishes both pMeanTrim and CpMeanTrim:
+        #     p / Cp = 756.1772  (std 2.7e-5 over 8.8M facets)
+        #     U = 38.889  ->  rho = 2q/U^2 = 1.0000000000036
+        # Same convention as Ahmed: incompressible solver in kinematic units.
+        rho=1.0,
         # DrivAerML paper: "The reference frontal area A = 2.17 m^2 is used for
         # force and moment coefficients." Confirmed independently by
         # geo_ref_1.csv, which reports aRefRef = 2.17 (constant) alongside
@@ -288,6 +351,7 @@ DATASETS: dict[str, Dataset] = {
             p="pMeanTrim",
             wss_vector="wallShearStressMeanTrim",   # 3-vector, DIMENSIONAL (Pa)
             wss_components=None,
+            normals="flip",      # clean() does nothing (7,383 -> 7,383). Global flip.
         ),
         source="arxiv.org/abs/2408.11969 + recon_all.json",
     ),
