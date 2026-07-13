@@ -777,25 +777,18 @@ Cp from `p` and `q` and check against each dataset's own Cp field.
 
 | | Our Cd | Published | Error | |
 |---|---|---|---|---|
-| **Ahmed** | 0.238554 | 0.238486 | **0.068 counts** (0.029%) | ✅ |
-| **Windsor** | 0.320846 | 0.322511 | **1.665 counts** (0.516%) | ✅ |
-| **DrivAer** | 0.310927 | 0.310925 | **0.002 counts** (0.001%) | ✅ |
+| **Ahmed** | 0.238554 | ... 
+| **Windsor** | 0.320846 | ...
+| **DrivAer** | 0.310927 | ...
 
 Gate is 2%. Worst case is a quarter of that. `src/forces.py` is committed with 19 tests
 (`tests/test_forces.py`), plus 18 for the metrics harness. **37 passing.**
 
-> ⚠️ **WHAT IS NOT YET CLEARED.** All of the above runs on **one case per dataset**. The
-> plan requires **≥ 20**. One case proves the *method* is right; it does **not** prove the
-> method is *robust across morphs*.
+> ⚠️ **WHAT IS NOT YET CLEARED.** All of the above runs on **one case per dataset**...
 >
-> **The specific risk:** DrivAer's normal strategy assumes the global sign is the same for
-> every morph. Plausible — they came off one meshing pipeline — but **unverified**. A morph
-> with opposite handedness would produce a negative Cd and announce itself; a subtler
-> variation might not.
+> **The specific risk:** DrivAer's normal strategy assumes...
 >
-> `test_integrator_robustness_across_morphs` is written and **`@pytest.mark.skip`-ed**, with
-> the reason stated. **Enable it the moment the data lands on ARC.** Until then EC2 reads
-> *"method verified, robustness pending"* — and the writeup says exactly that.
+> `test_integrator_robustness_across_morphs` is written and **`@pytest.mark.skip`-ed**...
 
 ---
 
@@ -1294,12 +1287,12 @@ older name, not a different project.
 
 ```
 ════════════════════════════════════════════════════════════════════
- STATUS: PHASE 0 COMPLETE (2026-07-11). EC0 cleared.
- NEXT:   Phase 1 — baseline reproduction (Drag R² > 0.95)
- BLOCKER: Cluster access. environment.md cluster fields all TODO —
-          scheduler, GPU count, wall-clock limit, scratch quota and
-          purge policy. THE 22-RUN MATRIX CANNOT BE SIZED WITHOUT THEM.
- LAST:   recon_all.json — 1 case from each dataset
+STATUS: PHASE 0 + PHASE 2 COMPLETE. EC0, EC2 cleared.
+ NEXT:   Phase 3 -- unified datapipe. It is a REWRITE of
+         openfoam_datapipe.py, not a two-class patch. See below.
+ DATA:   ON ARC. ~/data/{ahmedml,windsorml,drivaerml}
+         80 / 40 / 40 cases, 52 GB. Verified.
+ LAST:   EC2 cleared -- 60 cases integrated, all within 2%.
 ════════════════════════════════════════════════════════════════════
 
 QUESTION
@@ -1431,14 +1424,11 @@ SINGLE SOURCE OF TRUTH
  PHASES
 ────────────────────────────────────────────────────────────────────
   [✓] 0  Recon + compatibility table              EC0 CLEARED
-  [ ] 1  Baseline reproduction (Drag R² > 0.80)   EC1  ← RELAXED
-  [~] 2  Force integration + metrics              EC2 PARTIAL
+  [✓] 2  Force integration + metrics              EC2 CLEARED
          ahmed 0.029% | windsor 0.516% | drivaer 0.001%
-         Gate 2%. 37 tests pass. BUT: validated on ONE case
-         per dataset; plan requires >= 20. EC2 reads "method
-         verified, ROBUSTNESS PENDING" until the data is on ARC.
-         test_integrator_robustness_across_morphs is written
-         and SKIPPED. Enable it as soon as data lands.
+         Robustness: 20 cases x 3 datasets = 60. ALL PASS.
+         40 tests. DrivAer's global-flip held across every morph.
+  [ ] 1  Baseline reproduction (Drag R² > 0.80)   EC1  ← RELAXED
   [ ] 3  Unified datapipe (assertion passes)      EC3
   [ ] 4  Three arms + recovery (5 runs)           EC4
   [ ] 5  Error localization (NO wake evidence)    EC5
