@@ -84,11 +84,34 @@ echo ">>> installing our config into the example's conf/"
 cp "$REPO/conf/smoke.yaml" "$DOMINO/conf/smoke.yaml"
 
 echo ""
+cd "$DOMINO"
+
+echo ""
+echo ">>> computing scaling factors"
+echo "    ** THE LEAK LIVES HERE (plan Rem 9.1). **"
+echo "    For the real arms these are computed on the SOURCE set ONLY"
+echo "    (Ahmed + Windsor) and applied UNCHANGED to DrivAer. Recomputing"
+echo "    them on the target leaks its statistics into a supposedly cold"
+echo "    transfer -- and the resulting number would look entirely reasonable."
+echo "    Here we train and test on DrivAer, so it is moot. The machinery"
+echo "    still has to work."
+echo ""
+
+apptainer exec --nv \
+    --env PYTHONPATH="$DEPS:$REPO/external/physicsnemo" \
+    --env PHYSICSNEMO_DISABLE_RMM=True \
+    --env RANK=0 --env WORLD_SIZE=1 --env LOCAL_RANK=0 \
+    --env MASTER_ADDR=127.0.0.1 --env MASTER_PORT=29500 \
+    --bind "$HOME/smoke:/data" \
+    "$SIF" \
+    python compute_statistics.py --config-name=smoke \
+        ++data.input_dir=/data/train \
+        ++data.input_dir_val=/data/val \
+        ++output="$REPO/outputs/smoke" \
+        ++project_dir="$REPO/outputs/smoke"
 echo ">>> running train.py"
 echo "    10 epochs, 4 train cases, 2 val, surface-only"
 echo ""
-
-cd "$DOMINO"
 
 # ** PHYSICSNEMO_DISABLE_RMM=True IS REQUIRED, NOT OPTIONAL. **
 #
