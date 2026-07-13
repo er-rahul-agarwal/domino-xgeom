@@ -240,11 +240,6 @@ def test_published_cd_is_readable(dataset):
 # ROBUSTNESS -- NOT YET SATISFIED
 # ============================================================
 
-@pytest.mark.skip(
-    reason="Requires >= 20 cases per dataset. Only run_1 is on the dev laptop. "
-           "Enable when the data lands on ARC -- EXIT CRITERION 2 IS NOT FULLY "
-           "CLEARED UNTIL THIS RUNS."
-)
 @pytest.mark.parametrize("dataset", ["ahmed", "windsor", "drivaer"])
 def test_integrator_robustness_across_morphs(dataset):
     """
