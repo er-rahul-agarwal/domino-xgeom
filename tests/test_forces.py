@@ -258,7 +258,14 @@ def test_integrator_robustness_across_morphs(dataset):
     "method verified, robustness pending" -- and the writeup must say so.
     """
     root = DATA_ROOT / f"{dataset}ml"
-    cases = sorted(d for d in root.iterdir() if d.is_dir())[:20]
+    # HuggingFace leaves a .cache/ directory alongside the runs. Filter to real
+    # case directories only -- otherwise .cache is treated as a case, and the
+    # failure ("no surface file in .cache") looks like a data problem when it is
+    # a globbing problem.
+    cases = sorted(
+        d for d in root.iterdir()
+        if d.is_dir() and d.name.startswith("run_")
+    )[:20]
 
     if len(cases) < 20:
         pytest.skip(f"only {len(cases)} cases available; need 20")
