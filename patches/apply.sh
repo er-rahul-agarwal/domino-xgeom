@@ -127,6 +127,98 @@ print("    ok")
 PYEOF
 fi
 
+# ============================================================
+# PATCH #2 -- utils.py: load_scaling_factors must respect model_type
+#
+# ** THE SAME BUG, IN A DIFFERENT FILE. **
+#   load_scaling_factors() unconditionally reads scaling_factors[...]["volume_fields"],
+#   regardless of model_type. On a surface-only run the statistics file legitimately
+#   has no volume entry (patch #1 saw to that), so this dies:
+#
+#       KeyError: 'volume_fields'
+#
+# ** THE PATTERN, AND IT IS WORTH NAMING. **
+#   `model_type: surface` is a DOCUMENTED, LEGAL setting in NVIDIA's own config --
+#   one of three, alongside volume and combined. Their example code does not
+#   actually support it. Only the volume/combined path has been exercised.
+#
+#   This is the second file we have had to patch for the same assumption, and it
+#   will not be the last.
+# ============================================================
+
+echo ""
+echo ">>> patch 2: utils.py -- load_scaling_factors respects model_type"
+
+TARGET2="$DOMINO/utils.py"
+
+if grep -q "PATCHED: respect model_type" "$TARGET2"; then
+    echo "    already applied, skipping"
+else
+    python3 - "$TARGET2" <<'PYEOF'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+src = path.read_text()
+
+old = '''    if cfg.model.normalization == "min_max_scaling":
+        vol_factors = np.asarray(
+            [
+                scaling_factors.max_val["volume_fields"],
+                scaling_factors.min_val["volume_fields"],
+            ]
+        )'''
+
+new = '''    # ** PATCHED: respect model_type. **
+    #
+    # The original read "volume_fields" unconditionally. On a surface-only run the
+    # statistics file legitimately has no volume entry -- there IS no volume data --
+    # and this raised KeyError: 'volume_fields'.
+    #
+    # model_type is a documented setting with three legal values. This is the SECOND
+    # file that ignores it.
+    _has_volume = cfg.model.model_type in ("volume", "combined")
+
+    if cfg.model.normalization == "min_max_scaling":
+        vol_factors = np.asarray(
+            [
+                scaling_factors.max_val["volume_fields"],
+                scaling_factors.min_val["volume_fields"],
+            ]
+        ) if _has_volume else None'''
+
+if old not in src:
+    print("    ERROR: could not find the min_max block. Upstream changed.")
+    sys.exit(1)
+
+src = src.replace(old, new, 1)
+
+old2 = '''    elif cfg.model.normalization == "mean_std_scaling":
+        vol_factors = np.asarray(
+            [
+                scaling_factors.mean["volume_fields"],
+                scaling_factors.std["volume_fields"],
+            ]
+        )'''
+
+new2 = '''    elif cfg.model.normalization == "mean_std_scaling":
+        vol_factors = np.asarray(
+            [
+                scaling_factors.mean["volume_fields"],
+                scaling_factors.std["volume_fields"],
+            ]
+        ) if _has_volume else None'''
+
+if old2 not in src:
+    print("    ERROR: could not find the mean_std block. Upstream changed.")
+    sys.exit(1)
+
+src = src.replace(old2, new2, 1)
+path.write_text(src)
+print("    ok")
+PYEOF
+fi
+
 echo ""
 echo ">>> delta from upstream:"
 git diff --stat
