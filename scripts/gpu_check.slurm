@@ -17,13 +17,13 @@
 # ============================================================
 
 #SBATCH --job-name=domino-gpucheck
-#SBATCH --partition=gpu-l40
-#SBATCH --gres=gpu:2
+#SBATCH --partition=gpu-l40,gpu-v100,gpu-h100
+#SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --time=00:10:00
+#SBATCH --mem=16G
+#SBATCH --time=00:05:00
 #SBATCH --output=logs/gpucheck_%j.out
 #SBATCH --error=logs/gpucheck_%j.err
 
