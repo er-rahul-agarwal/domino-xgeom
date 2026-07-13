@@ -17,7 +17,7 @@
 # ============================================================
 
 #SBATCH --job-name=domino-gpucheck
-#SBATCH --partition=gpu-h100
+#SBATCH --partition=gpu-l40
 #SBATCH --gres=gpu:2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
