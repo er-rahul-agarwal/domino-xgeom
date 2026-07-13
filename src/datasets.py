@@ -323,6 +323,7 @@ DATASETS: dict[str, Dataset] = {
             wss_components=None,
             normals="clean",     # 58,308 open edges -> 0. Verified Phase 2.
         ),
+        swap_yz=False,       # already z-up
         source="arxiv.org/abs/2407.20801 + recon_all.json",
     ),
 
@@ -360,6 +361,7 @@ DATASETS: dict[str, Dataset] = {
             wss_components=("cfxavg", "cfyavg", "cfzavg"),
             normals="shipped",   # ** NEVER clean() -- it destroys the cell arrays **
         ),
+        swap_yz=True,        # ** y-up -> z-up. See the field docstring. **
         source="arxiv.org/abs/2407.19320 + recon_all.json",
     ),
 
@@ -394,6 +396,7 @@ DATASETS: dict[str, Dataset] = {
             wss_components=None,
             normals="flip",      # clean() does nothing (7,383 -> 7,383). Global flip.
         ),
+        swap_yz=False,       # already z-up
         source="arxiv.org/abs/2408.11969 + recon_all.json",
     ),
 }
