@@ -44,7 +44,23 @@
 set -euo pipefail
 
 REPO="$HOME/domino-xgeom"
-SIF="$HOME/containers/physicsnemo-2511.sif"
+# ** 25.06, NOT 25.11. **
+#
+# ARC's NVIDIA driver supports CUDA 12.6. The 25.11 container's PyTorch is built
+# against a newer CUDA and refuses to initialize:
+#
+#     CUDA initialization: The NVIDIA driver on your system is too old
+#     (found version 12060)
+#
+# It does not crash -- it falls back to CPU. Training would "work", ~100x slower.
+#
+# 25.06 ships torch 2.7 / CUDA 12.x, which the driver DOES support. Its
+# PhysicsNeMo (1.1.0) and Warp (1.7.2) are too old for our pinned source, but both
+# are overridden via PYTHONPATH from $HOME/pnemo-deps.
+#
+# ** THE CONSTRAINT IS THE DRIVER, NOT THE CONTAINER. ** We cannot use a newer
+# container than the driver supports, however much we might want its PhysicsNeMo.
+SIF="$HOME/containers/physicsnemo.sif"
 DEPS="$HOME/pnemo-deps"
 DOMINO="$REPO/external/physicsnemo/examples/cfd/external_aerodynamics/domino/src"
 

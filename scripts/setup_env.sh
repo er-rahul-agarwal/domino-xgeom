@@ -69,7 +69,23 @@
 
 set -euo pipefail
 
-SIF="$HOME/containers/physicsnemo-2511.sif"
+# ** 25.06, NOT 25.11. THE DRIVER IS THE CONSTRAINT. **
+#
+# ARC's NVIDIA driver supports CUDA 12.6. The 25.11 container's PyTorch is built
+# against a newer CUDA and refuses to initialize:
+#
+#     CUDA initialization: The NVIDIA driver on your system is too old
+#     (found version 12060)
+#
+# It does NOT crash. It falls back to CPU -- and training then "works", roughly a
+# hundred times slower, with a decreasing loss and real checkpoints. You would
+# find out when the 24-hour job timed out.
+#
+# 25.06 ships torch 2.7 built against a CUDA the driver DOES support.
+#
+# We cannot use a newer container than the driver allows, however much we might
+# want its PhysicsNeMo.
+SIF="$HOME/containers/physicsnemo.sif"
 DEPS="$HOME/pnemo-deps"
 
 if [[ ! -f "$SIF" ]]; then
@@ -96,7 +112,9 @@ apptainer exec "$SIF" pip install --target="$DEPS" --no-deps \
     pyvers \
     cloudpickle \
     orjson \
-    wadler-lindig
+    wadler-lindig \
+    timm \
+    torchinfo
 
 echo ""
 echo ">>> verifying: container's torch, OUR physicsnemo"
