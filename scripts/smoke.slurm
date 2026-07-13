@@ -79,6 +79,12 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 # train.py. Rather than fight that, copy ours into the example's conf/ under a
 # distinct name. The example's own config.yaml is left untouched -- we never edit
 # their code (the two-repository principle).
+
+echo ""
+echo ">>> applying our patches to the pinned clone"
+echo "    (idempotent -- safe to re-run; skips if already applied)"
+bash "$REPO/patches/apply.sh" < /dev/null
+
 echo ""
 echo ">>> installing our config into the example's conf/"
 cp "$REPO/conf/smoke.yaml" "$DOMINO/conf/smoke.yaml"
