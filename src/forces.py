@@ -155,11 +155,33 @@ def _oriented_surface(case_dir: Path, ds: Dataset) -> tuple[pv.PolyData, float]:
     # ---- AHMED: clean, then let VTK orient -----------------------------------
     if ds.surface.normals == "clean":
         surf = surf.clean(tolerance=1e-6).triangulate()
-        if surf.n_open_edges != 0:
+
+        # ** WHY A THRESHOLD AND NOT ZERO. **
+        #
+        # The first version demanded a PERFECTLY watertight mesh. That was wrong,
+        # and the robustness test caught it: Ahmed's run_12 has a genuine 28-edge
+        # hole that clean() cannot close at ANY tolerance (1e-6 through 5e-5 --
+        # all give 28). It is a handful of missing triangles in a 2.3M-cell mesh.
+        #
+        # And it does not matter. run_12 integrates to 0.028% of its published Cd
+        # -- identical accuracy to run_1, which IS watertight. auto_orient_normals
+        # degrades gracefully around a pinhole; it does not fail.
+        #
+        # What DOES break orientation is a mesh that is open EVERYWHERE -- Ahmed's
+        # raw 58,308 edges, DrivAer's 7,383. There, "outward" is genuinely
+        # undefined and VTK returns an inconsistent mix.
+        #
+        # So the test is PROPORTIONAL. A pinhole is noise. Wholesale
+        # non-manifoldness is not. 1e-4 of the cell count puts the boundary at
+        # ~235 edges for Ahmed -- an order of magnitude above the observed 28, and
+        # two orders below the 58,308 that actually signals trouble.
+        max_open = max(100, int(1e-4 * surf.n_cells))
+        if surf.n_open_edges > max_open:
             raise ValueError(
                 f"{case_dir.name}: {surf.n_open_edges} open edges remain after "
-                f"clean(). auto_orient_normals is NOT well-defined on an open "
-                f"surface and any Cd from this mesh is untrustworthy."
+                f"clean() ({surf.n_cells} cells; threshold {max_open}). The mesh "
+                f"is open enough that auto_orient_normals cannot determine "
+                f"'outward', and any Cd from it is untrustworthy."
             )
         surf = surf.compute_normals(
             cell_normals=True, point_normals=False,
