@@ -91,44 +91,76 @@ def sizes(dataset: str, n_cases: int) -> dict:
     Query file sizes WITHOUT downloading anything.
 
     WHY THIS EXISTS:
-        So that --dry-run can tell you what you are about to consume BEFORE you
-        consume it. On a shared cluster with a hard quota, "download and find out"
-        is not an acceptable workflow.
+        So --dry-run can tell you what you are about to consume BEFORE you consume
+        it. On a shared cluster with a hard quota, "download and find out" is not
+        an acceptable workflow.
+
+    ** WHY NOT repo_info(files_metadata=True) -- A REAL BUG, CAUGHT IN TESTING **
+        That endpoint TRUNCATES its sibling listing. For Windsor it reported 175
+        runs with runs 3-9 and 26-40 apparently "missing"; DrivAer likewise. Both
+        datasets appeared to have IDENTICAL gaps, which is not how independently
+        published datasets behave -- and that implausibility is what gave it away.
+
+        list_repo_files() is a separate endpoint and returns the full listing: 350
+        Windsor runs and 484 DrivAer runs, with NO gaps in 1-40.
+
+        Had we trusted the first endpoint, we would have silently downloaded
+        roughly half the cases we asked for and never known -- the script would
+        have reported success.
+
+        So: list_repo_files() for WHICH files exist. get_paths_info() for HOW BIG
+        they are.
     """
     api = HfApi()
-    info = api.repo_info(REPOS[dataset], repo_type="dataset", files_metadata=True)
+    stem = {"ahmed": "ahmed", "windsor": "windsor", "drivaer": "drivaer"}[dataset]
+    ext = "vtu" if dataset == "windsor" else "vtp"
 
-    wanted = set()
+    # Full, untruncated listing.
+    all_files = set(api.list_repo_files(REPOS[dataset], repo_type="dataset"))
+
+    wanted: list[str] = []
+    missing: list[int] = []
     for run in range(1, n_cases + 1):
-        stem = {"ahmed": "ahmed", "windsor": "windsor", "drivaer": "drivaer"}[dataset]
-        ext = "vtu" if dataset == "windsor" else "vtp"
-        wanted.add(f"run_{run}/{stem}_{run}.stl")
-        wanted.add(f"run_{run}/boundary_{run}.{ext}")
+        stl = f"run_{run}/{stem}_{run}.stl"
+        surf = f"run_{run}/boundary_{run}.{ext}"
+        if stl in all_files and surf in all_files:
+            wanted.append(stl)
+            wanted.append(surf)
+        else:
+            missing.append(run)
 
+    # CSVs are kilobytes; count them but do not bother sizing each one.
+    csvs = [f for f in all_files
+            if f.endswith(".csv") and f.startswith("run_")
+            and _run_no(f) is not None and _run_no(f) <= n_cases]
+
+    # Sizes, in batches -- get_paths_info has a request-size limit.
     total = 0
-    found = 0
-    for sibling in info.siblings:
-        name = sibling.rfilename
-        if name in wanted:
-            total += sibling.size or 0
-            found += 1
-        # CSVs: any file in one of our runs, ending .csv
-        elif name.endswith(".csv"):
-            run_dir = name.split("/")[0]
-            if run_dir.startswith("run_"):
-                try:
-                    if int(run_dir[4:]) <= n_cases:
-                        total += sibling.size or 0
-                except ValueError:
-                    pass
+    for i in range(0, len(wanted), 100):
+        for info in api.get_paths_info(
+            REPOS[dataset], wanted[i:i + 100], repo_type="dataset"
+        ):
+            total += getattr(info, "size", 0) or 0
 
     return {
         "dataset": dataset,
         "n_cases": n_cases,
         "gb": total / 1e9,
-        "files_matched": found,
-        "files_expected": len(wanted),
+        "n_found": len(wanted) // 2,
+        "n_csv": len(csvs),
+        "missing_runs": missing,
     }
+
+
+def _run_no(path: str) -> int | None:
+    """Extract the run number from 'run_17/foo.csv'. None if it does not parse."""
+    head = path.split("/")[0]
+    if not head.startswith("run_"):
+        return None
+    try:
+        return int(head[4:])
+    except ValueError:
+        return None
 
 
 def download(dataset: str, n_cases: int, out_root: Path) -> None:
@@ -183,10 +215,12 @@ def main() -> int:
     for name, n in counts.items():
         s = sizes(name, n)
         total_gb += s["gb"]
-        print(f"  {name:<10} {n:>6} {s['gb']:>8.1f} GB")
-        if s["files_matched"] != s["files_expected"]:
-            print(f"             ** only {s['files_matched']}/{s['files_expected']} "
-                  f"expected files found -- check the case count **")
+        print(f"  {name:<10} {n:>6} {s['gb']:>8.1f} GB   ({s['n_found']} cases, "
+              f"{s['n_csv']} csv)")
+        if s["missing_runs"]:
+            print(f"             ** MISSING RUNS: {s['missing_runs']} **")
+            print(f"             These do not exist in the repo. Not a bug in "
+                  f"this script -- verify against list_repo_files first.")
 
     print(f"  {'-' * 30}")
     print(f"  {'TOTAL':<10} {'':>6} {total_gb:>8.1f} GB\n")
