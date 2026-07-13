@@ -117,6 +117,11 @@ cd "$DOMINO"
 apptainer exec --nv \
     --env PYTHONPATH="$DEPS:$REPO/external/physicsnemo" \
     --env PHYSICSNEMO_DISABLE_RMM=True \
+    --env RANK=0 \
+    --env WORLD_SIZE=1 \
+    --env LOCAL_RANK=0 \
+    --env MASTER_ADDR=127.0.0.1 \
+    --env MASTER_PORT=29500 \
     --bind "$HOME/smoke:/data" \
     "$SIF" \
     python train.py --config-name=smoke \
