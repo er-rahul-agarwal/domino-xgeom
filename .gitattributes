@@ -1,0 +1,11 @@
+# Shell and Slurm scripts MUST have LF endings -- they run on Linux, and bash
+# chokes on \r:
+#
+#     sbatch: error: Batch script contains DOS line breaks (\r\n)
+#
+# Git on Windows converts LF to CRLF on checkout by default. This forces LF for
+# anything that will be executed on the cluster.
+*.sh    text eol=lf
+*.slurm text eol=lf
+*.py    text eol=lf
+*.yaml  text eol=lf
