@@ -75,11 +75,37 @@ def check_case(path: Path, dataset: str) -> list[str]:
     # old code is indistinguishable from a correct one EXCEPT by this test.
     y_span = float(v[:, 1].max() - v[:, 1].min())
     z_span = float(v[:, 2].max() - v[:, 2].min())
-    if ds.swap_yz and z_span < y_span:
-        problems.append(
-            f"NOT SWAPPED: y-span {y_span:.3f} > z-span {z_span:.3f}. This file "
-            f"was written by pre-swap code and is y-up. It will poison training."
-        )
+
+    # ** DO NOT TEST z_span > y_span. **
+    #
+    # That was the first version of this check, and it produced 20 FALSE
+    # POSITIVES on correct data. Windsor's morphs all share the same WIDTH
+    # (y-span 0.389 in every case) but vary in HEIGHT (z-span 0.300 to 0.475).
+    # Some are genuinely squatter than they are wide -- and the verifier called
+    # them poisoned.
+    #
+    # A verifier that cries wolf is worse than no verifier: the next real
+    # corruption gets waved through.
+    #
+    # Test something STRUCTURAL instead, which holds for a tall morph and a squat
+    # one alike:
+    #     after the swap, z is HEIGHT -> the body sits on the ground, z starts ~0
+    #     after the swap, y is WIDTH  -> the body is symmetric, y straddles zero
+    # Before the swap, exactly the reverse.
+    if ds.swap_yz:
+        y_mid = float((v[:, 1].max() + v[:, 1].min()) / 2)
+        z_min = float(v[:, 2].min())
+
+        if abs(y_mid) > 0.05 * y_span:
+            problems.append(
+                f"NOT SWAPPED: y is not centred on zero (midpoint {y_mid:.4f}). "
+                f"After the swap, y is WIDTH and must straddle the centreline."
+            )
+        if z_min < -0.05 * z_span:
+            problems.append(
+                f"NOT SWAPPED: z starts at {z_min:.4f}. After the swap, z is "
+                f"HEIGHT and must start at the ground plane (~0)."
+            )
 
     # ---- Streamwise axis -----------------------------------------------------
     # x must be the longest extent -- a vehicle is longest along the flow. DoMINO's
