@@ -542,6 +542,89 @@ dataset been oriented differently, the integral loss would have optimized a forc
 that is not drag. **All three are x-streamwise. Verified from the STL bounding boxes, not
 assumed.**
 
+### Trap 8 — Wall shear has the opposite sign convention
+
+OpenFOAM's `wallShearStress` is the stress the **wall exerts on the fluid** — the *negative*
+of what a drag integral needs.
+
+**Symptom: viscous drag came out negative.** Skin friction opposes motion. **A negative
+viscous drag is physically impossible**, and it should have been the first thing anyone
+noticed.
+
+**Fix:** negate `wallShearStressMean` / `wallShearStressMeanTrim`. **Windsor is exempt** — it
+publishes Cf directly, already in the right convention.
+
+### Trap 9 — ρ = 1.0, not 1.225
+
+**No dataset publishes ρ.** These are incompressible solvers in **kinematic units** —
+pressure is stored as `p/ρ` — so ρ never appears in their inputs. **Assuming sea-level air
+(1.225) is the natural mistake, and it is wrong.**
+
+**Found by:** each dataset publishes **both `p` and `Cp`**, so their ratio *is* `q`.
+
+| | `p / Cp` | σ | U∞ | → ρ |
+|---|---|---|---|---|
+| Ahmed | **0.500000** | 1.8e-9 *(1.1M facets)* | 1.0 | **1.0** |
+| DrivAer | **756.177161** | 2.7e-5 *(8.8M facets)* | 38.889 | **1.0000000000036** |
+
+**That is not an estimate. It is an identity.**
+
+With ρ = 1.225, Ahmed's viscous term was 22% low and its Cd 5% short — comfortably inside the
+range where a result still looks believable.
+
+> **The plan predicted this check** — *"Phase 2 must verify the assumed ρ by recomputing Cp
+> from p and q and checking against each dataset's own published Cp field."* It was right,
+> and it paid.
+
+### Trap 10 — Three datasets need three different normal strategies
+
+**Undocumented anywhere. A single code path silently fails on two of three.**
+
+| | Ships normals? | `clean()` | **Strategy** |
+|---|---|---|---|
+| **Ahmed** | No | **58,308 → 0 open edges** ✅ | `clean()` → `auto_orient_normals` |
+| **Windsor** | **Yes** ✅ | **destroys the cell arrays** ❌ | **use theirs. Never clean.** |
+| **DrivAer** | No | **7,383 → 7,383. No effect** ❌ | `consistent_normals` → **global flip** |
+
+**Ahmed's** mesh is stitched from per-patch exports with duplicated vertices at the seams —
+geometrically closed, topologically full of cracks. **To VTK this is an *open* surface, and
+for an open surface "outward" is undefined** — there is no inside to be outside of. So
+`auto_orient_normals` returns an *inconsistent mix*. `clean(1e-6)` merges the coincident
+vertices; VTK then orients correctly on its own.
+
+**DrivAer** ships no normals *and* `clean()` doesn't help — its cracks are not duplicate
+vertices. But `consistent_normals=True` makes the orientation locally coherent, leaving a
+single **global** sign, settled against the published Cd. Un-flipped: **−0.2533**. Flipped:
+**+0.31093** against a published **0.31092**.
+
+### Trap 11 — `clean()` destroys Windsor's cell arrays
+
+At tolerances loose enough to affect Windsor's topology, `clean()` **merges cells** while
+leaving the cell arrays at their old length — **4.99M cells against a 9.92M-entry `cfxavg`.**
+
+**pyvista only *warns*.** The resulting Cd is computed from **fields that no longer
+correspond to the facets they belong to** — and comes out as a perfectly plausible float.
+
+**Caught only because the open-edge guard refused to proceed.** Chasing the edge count down
+by loosening the tolerance — the obvious thing to do — would have produced a number, and it
+would have been meaningless.
+
+### Trap 12 — Inward normals
+
+Ahmed's first Cd: **−0.218** against a published **+0.238**. Same magnitude, opposite sign.
+
+**The most visible of the five, and the least dangerous** — a negative Cd announces itself.
+**The other four do not.**
+
+---
+
+> ### Twelve traps, and not one raises an error
+>
+> **Phase 0 found seven. Phase 2 found five more.** Every single failure in this project so
+> far has produced a **confident, plausible number**. Not one has produced a stack trace.
+>
+> **The exit criteria are not bureaucracy. They are the only detectors that exist.**
+
 ### The full compatibility table
 
 | | **Ahmed** | **Windsor** | **DrivAer** |
@@ -688,10 +771,31 @@ the published drag-R² plots. **Where the two disagree, PhysicsNeMo-CFD is corre
 **Also verify ρ here** ([Trap 6](#trap-6--u-spans-39-so-wall-shear-spans-1500)) — recompute
 Cp from `p` and `q` and check against each dataset's own Cp field.
 
-#### Exit Criterion 2
+#### Exit Criterion 2 — PARTIALLY CLEARED
 
-**The integrator reproduces published Cd from ground-truth fields to within 2% on all three
-datasets.** Committed and unit-tested.
+**Method verified. Robustness pending.**
+
+| | Our Cd | Published | Error | |
+|---|---|---|---|---|
+| **Ahmed** | 0.238554 | 0.238486 | **0.068 counts** (0.029%) | ✅ |
+| **Windsor** | 0.320846 | 0.322511 | **1.665 counts** (0.516%) | ✅ |
+| **DrivAer** | 0.310927 | 0.310925 | **0.002 counts** (0.001%) | ✅ |
+
+Gate is 2%. Worst case is a quarter of that. `src/forces.py` is committed with 19 tests
+(`tests/test_forces.py`), plus 18 for the metrics harness. **37 passing.**
+
+> ⚠️ **WHAT IS NOT YET CLEARED.** All of the above runs on **one case per dataset**. The
+> plan requires **≥ 20**. One case proves the *method* is right; it does **not** prove the
+> method is *robust across morphs*.
+>
+> **The specific risk:** DrivAer's normal strategy assumes the global sign is the same for
+> every morph. Plausible — they came off one meshing pipeline — but **unverified**. A morph
+> with opposite handedness would produce a negative Cd and announce itself; a subtler
+> variation might not.
+>
+> `test_integrator_robustness_across_morphs` is written and **`@pytest.mark.skip`-ed**, with
+> the reason stated. **Enable it the moment the data lands on ARC.** Until then EC2 reads
+> *"method verified, robustness pending"* — and the writeup says exactly that.
 
 ---
 
@@ -1251,6 +1355,46 @@ SINGLE SOURCE OF TRUTH
 
   ✓ DEFUSED: streamwise axis IS x in all three. Verified, not assumed.
 
+  ── Phase 2 found five MORE ──────────────────────────────────
+
+  8. WALL SHEAR HAS THE OPPOSITE SIGN. OpenFOAM reports
+     wall-on-fluid; a drag integral needs fluid-on-wall. Symptom:
+     NEGATIVE viscous drag -- physically impossible. Negate it.
+     (Windsor exempt: publishes Cf directly.)
+
+  9. rho = 1.0, NOT 1.225. Incompressible solvers in KINEMATIC
+     units -- rho never appears in their inputs, so assuming air is
+     the natural mistake. Backed out from p/Cp, which IS q:
+       Ahmed   p/Cp = 0.500000    (std 1.8e-9)  -> rho = 1.0
+       DrivAer p/Cp = 756.177161  (std 2.7e-5)  -> rho = 1.0
+     Not an estimate. An identity. With 1.225, Cd was 5% short.
+
+ 10. THREE DATASETS, THREE NORMAL STRATEGIES. Undocumented
+     anywhere. One code path silently fails on two of three.
+       ahmed    "clean"    58,308 open edges -> 0. Then VTK
+                           orients correctly on its own.
+       windsor  "shipped"  Dataset PROVIDES normals. Use them.
+                           ** NEVER clean() -- see trap 11 **
+       drivaer  "flip"     clean() does NOTHING (7,383 -> 7,383).
+                           consistent_normals + GLOBAL flip.
+                           Unflipped -0.2533, flipped +0.31093.
+
+ 11. clean() DESTROYS WINDSOR'S CELL ARRAYS. Merges cells, leaves
+     arrays at old length: 4.99M cells vs 9.92M-entry cfxavg.
+     pyvista only WARNS. Cd then computed from fields that no
+     longer match the facets. Caught ONLY by the open-edge guard.
+
+ 12. INWARD NORMALS. Ahmed Cd = -0.218 vs published +0.238.
+     The most visible of the five, and the LEAST dangerous --
+     a negative Cd announces itself. The other four do not.
+
+  ══════════════════════════════════════════════════════════════
+   TWELVE TRAPS. NOT ONE RAISES AN ERROR. Every failure so far
+   has produced a confident, plausible number. Not one has
+   produced a stack trace. The exit criteria are the ONLY
+   detectors that exist.
+  ══════════════════════════════════════════════════════════════
+
 ────────────────────────────────────────────────────────────────────
  ⚠  REDUCED SCALE. See §Scale. Scale-invariant by construction —
     case counts live in conf/base.yaml, never in code.
@@ -1288,7 +1432,13 @@ SINGLE SOURCE OF TRUTH
 ────────────────────────────────────────────────────────────────────
   [✓] 0  Recon + compatibility table              EC0 CLEARED
   [ ] 1  Baseline reproduction (Drag R² > 0.80)   EC1  ← RELAXED
-  [ ] 2  Force integration + metrics (< 2%)       EC2
+  [~] 2  Force integration + metrics              EC2 PARTIAL
+         ahmed 0.029% | windsor 0.516% | drivaer 0.001%
+         Gate 2%. 37 tests pass. BUT: validated on ONE case
+         per dataset; plan requires >= 20. EC2 reads "method
+         verified, ROBUSTNESS PENDING" until the data is on ARC.
+         test_integrator_robustness_across_morphs is written
+         and SKIPPED. Enable it as soon as data lands.
   [ ] 3  Unified datapipe (assertion passes)      EC3
   [ ] 4  Three arms + recovery (5 runs)           EC4
   [ ] 5  Error localization (NO wake evidence)    EC5
