@@ -171,9 +171,21 @@ def build_case(case_dir: Path, dataset: str) -> dict:
     # Per-dataset, NOT global. Ahmed is 1 m/s; DrivAer is 38.889. Passing one
     # value for all three -- which is what NVIDIA's config does -- would be wrong
     # by a factor of ~1500 on the wall shear.
-    if ds.rho is None:
-        raise ValueError(f"{ds.name}: rho is None. Verify it before preprocessing.")
-    global_params = np.array([ds.u_inf, ds.rho], dtype=np.float32)
+    # ** rho IS NOT REQUIRED FOR EVERY DATASET. **
+    #
+    # Windsor publishes Cf directly, already non-dimensional, so rho never enters
+    # its physics -- which is exactly why datasets.py records it as None rather
+    # than inventing one. forces.py validates Windsor to 0.5% without it.
+    #
+    # DoMINO carries global_params_values through the pipeline but DOES NOT READ
+    # THEM: conf/config.yaml has `encode_parameters: false`. The field is inert.
+    #
+    # So we write NaN rather than a fabricated number. If someone later sets
+    # encode_parameters=true, a NaN will POISON the forward pass loudly and
+    # immediately -- which is what we want. A plausible-looking 1.0 would enter
+    # the model silently and nobody would ever know.
+    rho_out = ds.rho if ds.rho is not None else np.nan
+    global_params = np.array([ds.u_inf, rho_out], dtype=np.float32)
 
     return {
         "stl_coordinates": stl_vertices,
