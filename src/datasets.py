@@ -200,6 +200,47 @@ class Dataset:
     stl_glob: str
     surface: SurfaceFields
 
+    # ---- Coordinate transform -----------------------------------------------
+    # ** WINDSOR IS Y-UP. AHMED AND DRIVAER ARE Z-UP. **
+    #
+    # WindsorML paper: "for all the simulations in this work, y is upwards, which
+    # differs to the original Windsor geometry where z is upwards." Recon
+    # confirms it: Windsor's STL spans y in [0, 0.475] (height) and z in [-0.194,
+    # +0.194] (width).
+    #
+    # THE PROBLEM THIS CAUSES:
+    #   The model has FOUR output channels: [Cp, Cf_x, Cf_y, Cf_z]. For Ahmed and
+    #   DrivAer, channel 2 is LATERAL shear. For Windsor, channel 2 is VERTICAL
+    #   shear. The network cannot know that -- it has ONE neuron for channel 2,
+    #   and it is being asked to fit two different physical quantities into it
+    #   depending on which body it happens to be looking at.
+    #
+    #   The geometry encoder has the same problem: it sees y-up STL coordinates
+    #   for Windsor and z-up for the others.
+    #
+    #   Drag is SAFE either way -- channel 1 is streamwise in all three, verified
+    #   from the STL bounds. But H5 (does a second body family buy anything?)
+    #   depends on Windsor contributing real signal, and a quarter of the source
+    #   data with two channels transposed contributes signal we cannot quantify.
+    #
+    # THE FIX:
+    #   Swap y and z for Windsor -- in the STL coordinates, the surface normals,
+    #   AND the shear channels. All three, or the transform is worse than the
+    #   problem: y-up geometry feeding z-up targets is a NEW inconsistency.
+    #
+    #   This transforms Windsor away from its published convention. That is a
+    #   deliberate, documented choice, and the writeup states it: "Windsor's
+    #   published convention is y-up; we transformed it into the z-up convention
+    #   shared by Ahmed and DrivAer, so that all four target channels have
+    #   consistent physical meaning across the source distribution."
+    #
+    # NOTE: forces.py does NOT apply this. It works in each dataset's own frame
+    # and validates against each dataset's own published Cd -- which is correct,
+    # and which is why it reports Cl along Windsor's y (matching cl = -0.0611 to
+    # 0.4 counts). The swap is a TRAINING-DATA transform, applied in
+    # preprocess.py only.
+    swap_yz: bool
+
     # ---- Provenance ---------------------------------------------------------
     source: str
 
