@@ -34,6 +34,56 @@ No other file may hardcode a field name, a reference area, or a freestream veloc
 
 ---
 
+## Scale
+
+**This study runs at reduced scale.** Every component is scale-invariant by
+construction: case counts and run budgets live in `conf/base.yaml`, never in code.
+Scaling to the full study means editing four numbers and requesting more wall-clock —
+nothing is rewritten.
+
+| | **This study** | Full study |
+|---|---|---|
+| Ahmed | **80** | 500 |
+| Windsor | **40** | 355 |
+| DrivAer | **40** (20 holdout + 20 FT pool) | 500 |
+| Arms | **A1, A2, A3** | A1, A2, A3a, A3 |
+| Recovery budgets | **N ∈ {0, 5, 20}** | N ∈ {0, 5, 10, 25, 50, 100} |
+| Seeds | **1** | 3 |
+| **Total runs** | **5** | 22 |
+| **Raw storage** | **~55 GB** | ~590 GB |
+
+**Why.** Storage on the ARC cluster is shared and finite; this is one of several
+projects competing for a 500 GB home quota. The reduced scale was chosen deliberately
+to preserve **every technique** in the full study while cutting only **statistical
+power**.
+
+**What is preserved.** All seven silent traps ([§5](#5-the-seven-traps)) are still
+live and still must be handled. The datapipe still unifies three incompatible dataset
+formats. The force integrator is still validated to 2% against ground truth. The
+fine-tuning path still hits the epoch trap. **Nothing about the engineering is easier
+at this scale.**
+
+**What is lost — stated plainly, not buried:**
+
+- **Statistical power.** Spearman ρ over 20 designs is noisy. Report the confidence
+  interval, and do not over-read it.
+- **Seed spread.** One seed per N. **The recovery curve is indicative, not evidential.**
+  At N=5, the identity of the five cases dominates the outcome — with one seed, that
+  variance is invisible rather than absent.
+- **It is not a curve.** Three points (N = 0, 5, 20) is a line segment. **Do not
+  annotate a "knee" that three points cannot resolve.**
+- **A3a is cut.** H5 (source diversity) cannot be adjudicated. It remains registered
+  and unanswered.
+- **Wake evidence is cut** (49 GB per case). **H2 becomes *asserted*, not *shown*** —
+  the exact gap the full plan called out as a reviewer's first question.
+- **Exit Criterion 1 is relaxed** from R² > 0.95 to **R² > 0.80**, because A1 trains on
+  ~20 cases rather than 400. See [EC1](#exit-criterion-1).
+
+**The honest summary:** this study establishes whether the *pipeline* works and gives a
+*directional* answer on transfer. **It does not establish the recovery cost with
+publishable precision.** That is a scale limitation, not a design flaw, and it is
+stated wherever a number is reported.
+
 ## Contents
 
 - [1. The question](#1-the-question)
@@ -578,10 +628,27 @@ therefore affordable.
 
 #### Exit Criterion 1
 
-**Surface pressure rel. L2 within ±20% of the docs baseline, and Drag R² > 0.95** on
-held-out DrivAer morphs.
+**Drag R² > 0.80** on the held-out DrivAer morphs.
 
-**If not: stop and debug. Do not proceed with a broken instrument.**
+> ⚠️ **This is relaxed from the full study's R² > 0.95, and the relaxation must be
+> stated wherever the number is reported.** NVIDIA's 0.983 came from ~400 training
+> morphs. A1 here trains on ~20. **R² is a function of training-set size as much as of
+> pipeline correctness**, and it would be dishonest to present a low R² as a pipeline
+> failure — or a high one as vindication.
+>
+> **What EC1 actually tests at this scale:** that the data loads, the loss decreases,
+> the checkpoint saves, the model produces a surface field, and the force integrator
+> turns that field into a plausible Cd. **It is a smoke test for the instrument, not a
+> demonstration of accuracy.**
+>
+> **If R² < 0.80 — stop and debug.** Something is broken, and it is more likely the
+> variable ordering ([Trap 1](#trap-1--variable-ordering-is-hardcoded)) or the force
+> integrator than the sample count.
+>
+> **If R² > 0.95 on 20 training cases — be suspicious, not pleased.** Check for leakage
+> before celebrating.
+
+**Do not proceed with a broken instrument.**
 
 ---
 
@@ -681,10 +748,36 @@ belief.**
 
 | Arm | Train | Test | What it establishes |
 |---|---|---|---|
-| **A1** | DrivAer (400) | DrivAer (100 held out) | Baseline. The instrument works. |
-| **A2** | DrivAer (500) | Ahmed + Windsor | **Downward control (H4). GATE — run before A3.** |
-| **A3a** | Ahmed only (500) | DrivAer (500) | Interpretive control (H5). |
-| **A3** | **Ahmed + Windsor (855)** | **DrivAer (500)** | **THE EXPERIMENT (H1).** |
+| **A1** | DrivAer (20) | DrivAer (20 holdout) | Instrument check. **Smoke test, not accuracy** — see [EC1](#exit-criterion-1). |
+| **A2** | DrivAer (40) | Ahmed + Windsor | **Downward control (H4). GATE — run before A3.** |
+| **A3** | **Ahmed (80) + Windsor (40)** | **DrivAer (20 holdout)** | **THE EXPERIMENT (H1).** |
+
+> **A3a is cut at this scale.** H5 (source diversity buys transfer) **remains registered
+> and unadjudicated.** It is not refuted, not confirmed, and not quietly dropped — it is
+> a question this study cannot answer, and the writeup says so.
+
+> **A2 is a gate, not filler.** If the downward control fails, the pipeline is broken and
+> A3 is uninterpretable. **There is no point spending the run.**
+
+#### The recovery curve — three points, not a curve
+
+From the **A3** checkpoint, fine-tune on **N ∈ {0, 5, 20}** DrivAer cases from the
+20-case fine-tuning pool, evaluating on the **20-case holdout that is never fine-tuned
+on**.
+
+⚠️ **See [Trap 2](#trap-2--fine-tuning-silently-trains-nothing) before running this.**
+The naive `resume_dir` approach trains **zero steps** and writes a checkpoint anyway.
+
+> **Three points is a line segment.** The full study runs six budgets × three seeds
+> precisely because **at small N the identity of the cases dominates the outcome**. With
+> one seed, that variance is not absent — **it is invisible.**
+>
+> **Do not annotate a knee.** Three points cannot resolve one. **Do not fit a curve.**
+> Plot the points, connect them if you must, and say in the caption that this is
+> directional evidence and nothing more.
+
+**5 runs total:** A1, A2, A3, FT N=5, FT N=20. *(N=0 is the A3 cold checkpoint — no
+extra run.)*
 
 > **A2 is a gate, not filler.** If the downward control fails, the pipeline is broken and A3
 > is uninterpretable. **There is no point spending the run.**
@@ -1159,30 +1252,46 @@ SINGLE SOURCE OF TRUTH
   ✓ DEFUSED: streamwise axis IS x in all three. Verified, not assumed.
 
 ────────────────────────────────────────────────────────────────────
+ ⚠  REDUCED SCALE. See §Scale. Scale-invariant by construction —
+    case counts live in conf/base.yaml, never in code.
+────────────────────────────────────────────────────────────────────
+  Ahmed   80  cases  (full study: 500)
+  Windsor 40  cases  (full study: 355)
+  DrivAer 40  cases  (full study: 500) → 20 holdout + 20 FT pool
+  ~55 GB raw. Storage is shared across several projects.
+
+  CUT: A3a (H5 unadjudicated). Wake VTUs (H2 asserted, not shown).
+       Seed spread (curve is indicative, not evidential).
+  RELAXED: EC1 from R² > 0.95 to R² > 0.80 — A1 trains on 20 cases.
+
+  NOTHING ABOUT THE ENGINEERING IS EASIER AT THIS SCALE. All seven
+  traps are live. Scaling up = edit four numbers, ask for more
+  wall-clock. Nothing is rewritten.
+
+────────────────────────────────────────────────────────────────────
  ARMS — RUN IN THIS ORDER
 ────────────────────────────────────────────────────────────────────
-  A1   DrivAer → DrivAer holdout    instrument check
-  A2   DrivAer → Ahmed+Windsor      CONTROL — ** GATE. RUN BEFORE A3. **
-                                    If this fails, A3 is uninterpretable.
-  A3a  Ahmed only → DrivAer         interpretive control (H5)
-                                    OWN scaling factors. Do NOT reuse A3's.
-  A3   Ahmed+Windsor → DrivAer      ** THE EXPERIMENT **
-  +    recovery: fine-tune A3 on N ∈ {0,5,10,25,50,100}, 3 seeds each
-  =    22 runs
+  A1   DrivAer(20) → DrivAer holdout(20)   instrument SMOKE TEST
+  A2   DrivAer(40) → Ahmed+Windsor         CONTROL — ** GATE **
+                                           If this fails, A3 is
+                                           uninterpretable. STOP.
+  A3   Ahmed(80)+Windsor(40) → DrivAer(20) ** THE EXPERIMENT **
+  +    recovery: fine-tune A3 on N ∈ {0, 5, 20}, ONE seed
+  =    5 runs
 
-  A3a IS NOT A CURVE. Two points. Plot as bare points on F1, NEVER
-  joined. The Ahmed(500) vs Ahmed+Windsor(855) sample-count confound
-  is ACCEPTED AND STATED, not closed.
+  THREE POINTS IS NOT A CURVE. Do not annotate a knee. Do not fit.
+  At small N the identity of the cases dominates — with one seed that
+  variance is INVISIBLE, not absent.
 
 ────────────────────────────────────────────────────────────────────
  PHASES
 ────────────────────────────────────────────────────────────────────
   [✓] 0  Recon + compatibility table              EC0 CLEARED
-  [ ] 1  Baseline reproduction (Drag R² > 0.95)   EC1
+  [ ] 1  Baseline reproduction (Drag R² > 0.80)   EC1  ← RELAXED
   [ ] 2  Force integration + metrics (< 2%)       EC2
   [ ] 3  Unified datapipe (assertion passes)      EC3
-  [ ] 4  Four arms + recovery curve (22 runs)     EC4
-  [ ] 5  Error localization + wake evidence       EC5
+  [ ] 4  Three arms + recovery (5 runs)           EC4
+  [ ] 5  Error localization (NO wake evidence)    EC5
   [ ] 6  Writeup: 3 figures, 1 sentence
 
 ────────────────────────────────────────────────────────────────────
