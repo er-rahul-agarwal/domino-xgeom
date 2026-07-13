@@ -1,0 +1,256 @@
+# ============================================================
+# SMOKE TEST -- does DoMINO eat our data at all?
+#
+# ** THIS IS NOT A TRAINING RUN. **
+#   It is a 10-epoch, few-case, surface-only probe whose ONLY success criterion is
+#   "does anything happen?". Accuracy is meaningless here and must not be read as
+#   anything.
+#
+#   We have never run train.py. Everything downstream rests on a .npy contract we
+#   reverse-engineered from CachedDoMINODataset.__getitem__. If a key name, dtype
+#   or shape is wrong, we find out HERE -- in ten minutes -- rather than after
+#   queueing a 24-hour job behind a twelve-hour GPU wait.
+#
+# ** WHAT DIFFERS FROM NVIDIA'S SHIPPED config.yaml, AND WHY **
+#
+#   model_type: combined -> surface
+#       We have NO volume data. This study is surface-only: drag needs only the
+#       surface integral, and DrivAer's volume is 49 GB per case against 800 MB
+#       for the surface -- a factor of 61. "combined" would look for volume_fields
+#       and find None.
+#
+#   variables.surface.solution
+#       Theirs:  pMeanTrim (scalar) + wallShearStressMeanTrim (vector)  -- DrivAer's
+#                DIMENSIONAL fields, in Pascals.
+#       Ours:    Cp (scalar) + Cf (vector) = 4 channels.
+#
+#       ** THE NAMES ARE COSMETIC. ** train.py:392 assigns surface_variable_names
+#       and never uses it again; only the COUNT reaches the model
+#       (train.py:563, output_features_surf=num_surf_vars). get_num_vars counts
+#       vector=3, scalar=1.
+#
+#       So this block sets the model's output width to 4. The channel ORDER comes
+#       entirely from how we wrote the .npy -- [Cp, Cf_x, Cf_y, Cf_z] -- which
+#       preprocess.py asserts. That matters because loss.py:423 indexes
+#       POSITIONALLY:
+#           pres_true = output_true[:, :, 0] * normals[:, :, 0]
+#           wx_true   = output_true[:, :, 1]
+#       A permuted channel produces a smooth, converging loss and a worthless model.
+#
+#   epochs: 1000 -> 10
+#       A smoke test. We want a stack trace or a checkpoint, not a model.
+#
+#   geom_points_sample: 300_000 -> 20_000
+#       ** MUST be less than the number of STL points. ** Ahmed's STL has 74,976
+#       vertices; 300k would ask for more points than exist. DrivAer has 376k, so
+#       the shipped value works for DrivAer and silently breaks on Ahmed -- which
+#       is exactly the kind of DrivAer-specific default this config exists to
+#       correct.
+#
+#   air_density: 1.205 -> 1.0
+#       Their value is wrong. We backed rho out of p/Cp in Phase 2: it is EXACTLY
+#       1.0 (std 1.8e-9 over 1.1M facets). These are incompressible solvers in
+#       kinematic units. INERT here, because encode_parameters is false -- but a
+#       wrong number left lying in a config is a trap for whoever flips that flag.
+#
+#   bounding_box_surface
+#       Theirs is tuned for DrivAer (4.7 m long). AHMED IS 1.19 m -- it would
+#       occupy a corner of DrivAer's box and the model would never learn to use
+#       the domain. For the smoke test we use DrivAer only, so DrivAer's box is
+#       correct. Phase 3's per-body-box decision bites when we mix datasets.
+# ============================================================
+
+project:
+  name: smoke
+exp_tag: 1
+project_dir: outputs/${project.name}/
+output: outputs/${project.name}/${exp_tag}
+
+hydra:
+  run:
+    dir: ${output}
+  output_subdir: hydra
+
+resume_dir: ${output}/models
+
+# ------------------------------------------------------------
+# Unused -- we preprocess with our own src/preprocess.py, not NVIDIA's
+# process_data.py (which divides by rho*U^2 with no factor of two, hardcodes
+# rho=1.226, and takes ONE global velocity for all datasets while Ahmed runs at
+# 1 m/s and DrivAer at 38.889). Present only because Hydra requires the keys.
+# ------------------------------------------------------------
+data_processor:
+  kind: drivaer_aws
+  output_dir: /unused/
+  input_dir: /unused/
+  cached_dir: /unused/
+  use_cache: false
+  num_processors: 1
+
+# ------------------------------------------------------------
+# ** THE CHANNEL COUNT. Names are cosmetic; the count is not. **
+# Cp (scalar, 1) + Cf (vector, 3) = 4, matching our (N, 4) surface_fields.
+# ------------------------------------------------------------
+variables:
+  surface:
+    solution:
+      Cp: scalar
+      Cf: vector
+  volume:
+    solution: {}          # surface-only study
+  global_parameters:
+    inlet_velocity:
+      type: vector
+      reference: [38.889]     # DrivAer. Inert (encode_parameters: false).
+    air_density:
+      type: scalar
+      reference: 1.0          # VERIFIED in Phase 2, not the shipped 1.205.
+
+data:
+  input_dir: /workspace/processed/drivaer_smoke_train
+  input_dir_val: /workspace/processed/drivaer_smoke_val
+
+  # DrivAer's own box. Ahmed would need its own -- see the header.
+  bounding_box:
+    min: [-3.5, -2.25, -0.32]
+    max: [8.5, 2.25, 3.00]
+  bounding_box_surface:
+    min: [-1.5, -1.4, -0.32]
+    max: [5.0, 1.4, 1.4]
+
+  gpu_preprocessing: true
+  gpu_output: true
+  normalize_coordinates: true
+  sample_in_bbox: true
+  sampling: true
+  scaling_factors: ${project_dir}/scaling_factors/scaling_factors.pkl
+  volume_sample_from_disk: false     # no volumes
+  max_samples_for_statistics: 10
+
+domain_parallelism:
+  domain_size: 1
+  shard_grid: false
+  shard_points: false
+
+model:
+  model_type: surface               # ** NOT combined. No volume data. **
+  activation: "gelu"
+  loss_function:
+    loss_type: "mse"
+    area_weighing_factor: 10000
+  interp_res: [128, 64, 64]
+  use_sdf_in_basis_func: true
+  volume_points_sample: 8192        # ignored in surface mode
+  surface_points_sample: 8192       # ** the OOM knob **
+  surface_sampling_algorithm: area_weighted
+  geom_points_sample: 20_000        # < STL point count. See the header.
+  num_neighbors_surface: 7
+  num_neighbors_volume: 10
+  combine_volume_surface: false
+  return_volume_neighbors: false
+  use_surface_normals: true
+  use_surface_area: true
+  integral_loss_scaling_factor: 100
+  normalization: min_max_scaling
+  encode_parameters: false
+  surf_loss_scaling: 5.0
+  vol_loss_scaling: 1.0
+  geometry_encoding_type: both
+  solution_calculation_mode: two-loop
+  geometry_rep:
+    geo_conv:
+      base_neurons: 32
+      base_neurons_in: 1
+      base_neurons_out: 1
+      volume_radii: [0.1, 0.5, 1.0, 2.5]
+      surface_radii: [0.01, 0.05, 1.0]
+      surface_hops: 1
+      volume_hops: 1
+      volume_neighbors_in_radius: [32, 64, 128, 256]
+      surface_neighbors_in_radius: [8, 16, 128]
+      fourier_features: false
+      num_modes: 5
+      activation: ${model.activation}
+    geo_processor:
+      base_filters: 8
+      activation: ${model.activation}
+      processor_type: conv
+      self_attention: false
+      cross_attention: false
+      surface_sdf_scaling_factor: [0.01, 0.02, 0.04]
+      volume_sdf_scaling_factor: [0.04]
+  nn_basis_functions:
+    base_layer: 512
+    fourier_features: true
+    num_modes: 5
+    activation: ${model.activation}
+  local_point_conv:
+    activation: ${model.activation}
+  aggregation_model:
+    base_layer: 512
+    activation: ${model.activation}
+  position_encoder:
+    base_neurons: 512
+    activation: ${model.activation}
+    fourier_features: true
+    num_modes: 5
+  geometry_local:
+    volume_neighbors_in_radius: [64, 128]
+    surface_neighbors_in_radius: [32, 128]
+    volume_radii: [0.1, 0.25]
+    surface_radii: [0.05, 0.25]
+    base_layer: 512
+  parameter_model:
+    base_layer: 512
+    fourier_features: false
+    num_modes: 5
+    activation: ${model.activation}
+
+train:
+  epochs: 10                        # ** SMOKE TEST. Not a training run. **
+  checkpoint_interval: 5
+  dataloader:
+    batch_size: 1
+    preload_depth: 1
+    pin_memory: false               # gpu_output is true -- see the shipped comment
+  sampler:
+    shuffle: true
+    drop_last: false
+  checkpoint_dir: /unused/          # dead key; train.py reads resume_dir instead
+  add_physics_loss: false
+  lr_scheduler:
+    name: MultiStepLR
+    milestones: [5]
+    gamma: 0.5
+    T_max: ${train.epochs}
+    eta_min: 1e-6
+  optimizer:
+    name: Adam
+    lr: 0.001
+    weight_decay: 0.0
+  amp:
+    enabled: true
+    autocast:
+      dtype: torch.float16
+    scaler:
+      _target_: torch.cuda.amp.GradScaler
+      enabled: ${..enabled}
+    clip_grad: true
+    grad_max_norm: 2.0
+
+val:
+  dataloader:
+    batch_size: 1
+    preload_depth: 1
+    pin_memory: false
+  sampler:
+    shuffle: true
+    drop_last: false
+
+eval:
+  test_path: /unused/
+  save_path: /unused/
+  checkpoint_name: unused.pt
+  scaling_param_path: /unused/
+  refine_stl: false
+  num_points: 1_240_000
